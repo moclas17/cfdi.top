@@ -15,3 +15,9 @@ private/autofactura/claude.md
 # Local editor / OS clutter
 .vscode/
 .idea/
+
+# Hosting/system folders
+/cgi-bin/
+/document_errors/
+/logs/
+/stats/
