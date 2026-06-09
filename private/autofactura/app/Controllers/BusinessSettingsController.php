@@ -566,23 +566,25 @@ class BusinessSettingsController
         $responseText = is_array($decoded) ? json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : trim((string) $response);
         $responseText = $responseText !== '' ? $responseText : 'Respuesta vacía';
 
-        $alreadyExists = $httpCode === 409
-            || str_contains(strtolower($responseText), 'existe')
-            || str_contains(strtolower($responseText), 'duplic');
-
-        if ($alreadyExists) {
-            AutofacturaLog::log(
-                'ef_assign_user_error',
-                null,
-                (int) $business['id'],
-                'El servicio reportó que el usuario ya existe: ' . $responseText
-            );
-            throw new RuntimeException('No se pudo registrar la cuenta de timbrado porque el servicio reportó que el usuario ya existe. Revisa la cuenta previa en EfectosFiscales antes de guardar el CSD.');
-        }
-
         if ($httpCode < 200 || $httpCode >= 300) {
             AutofacturaLog::log('ef_assign_user_error', null, (int) $business['id'], 'HTTP ' . $httpCode . ': ' . $responseText);
             throw new RuntimeException('No se pudo registrar la cuenta de timbrado automáticamente. Respuesta del servicio: ' . $responseText);
+        }
+
+        if (!is_array($decoded)) {
+            AutofacturaLog::log('ef_assign_user_error', null, (int) $business['id'], 'Respuesta no JSON: ' . $responseText);
+            throw new RuntimeException('No se pudo registrar la cuenta de timbrado automáticamente. El servicio devolvió una respuesta no válida.');
+        }
+
+        $ok = $decoded['ok'] ?? null;
+        if ($ok !== true && $ok !== 1 && $ok !== '1') {
+            $serviceMessage = trim((string) ($decoded['message'] ?? ''));
+            if ($serviceMessage === '') {
+                $serviceMessage = $responseText;
+            }
+
+            AutofacturaLog::log('ef_assign_user_error', null, (int) $business['id'], 'Servicio EF: ' . $serviceMessage);
+            throw new RuntimeException('No se pudo registrar la cuenta de timbrado automáticamente. Respuesta del servicio: ' . $serviceMessage);
         }
 
         AutofacturaLog::log(
