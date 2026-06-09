@@ -1,6 +1,7 @@
 .DS_Store
 
 # Environment / local secrets
+/.htaccess
 private/autofactura/.env
 
 # Runtime storage and uploaded/generated files
