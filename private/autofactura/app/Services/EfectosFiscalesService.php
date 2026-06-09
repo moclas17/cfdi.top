@@ -1573,7 +1573,7 @@ class EfectosFiscalesService
             $output = shell_exec($command);
             $pem = @file_get_contents($outputPath);
             if ($pem === false || trim($pem) === '') {
-                throw new RuntimeException('No se pudo convertir la llave privada CSD a PEM. ' . trim((string) $output));
+                throw new RuntimeException('La contraseña del CSD es incorrecta.');
             }
 
             return $pem;
