@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 180" role="img" aria-label="AutoFactura">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#58adff"/>
+      <stop offset="1" stop-color="#2d7fe0"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="148" height="148" rx="34" fill="url(#g)"/>
+  <rect x="28" y="26" width="94" height="110" rx="14" fill="#ffffff" opacity="0.95"/>
+  <polygon points="104,26 122,44 104,44" fill="#dbe9f8"/>
+  <rect x="40" y="50" width="48" height="8" rx="4" fill="#63b0ff"/>
+  <rect x="40" y="66" width="48" height="8" rx="4" fill="#63b0ff"/>
+  <rect x="40" y="82" width="48" height="8" rx="4" fill="#63b0ff"/>
+  <circle cx="102" cy="106" r="26" fill="#ffffff" stroke="#2d7fe0" stroke-width="7"/>
+  <line x1="118" y1="122" x2="135" y2="139" stroke="#2d7fe0" stroke-width="9" stroke-linecap="round"/>
+  <rect x="90" y="94" width="10" height="10" fill="#63b0ff"/>
+  <rect x="104" y="94" width="10" height="10" fill="#63b0ff"/>
+  <rect x="90" y="108" width="10" height="10" fill="#63b0ff"/>
+  <rect x="104" y="108" width="10" height="10" fill="#63b0ff"/>
+  <text x="185" y="110" font-family="Inter, Arial, sans-serif" font-size="84" font-weight="700" fill="#2d7fe0">AutoFactura</text>
+</svg>

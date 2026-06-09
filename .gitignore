@@ -1,0 +1,17 @@
+.DS_Store
+
+# Environment / local secrets
+private/autofactura/.env
+
+# Runtime storage and uploaded/generated files
+private/autofactura/storage/
+private/autofactura/app/Libraries/phpqrcode/cache/
+private/autofactura/app/Libraries/phpqrcode/temp/
+
+# Internal workspace notes
+private/autofactura/AGENTS.md
+private/autofactura/claude.md
+
+# Local editor / OS clutter
+.vscode/
+.idea/
