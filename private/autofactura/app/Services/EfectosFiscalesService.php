@@ -1460,6 +1460,53 @@ class EfectosFiscalesService
         return trim($cadena);
     }
 
+    public static function validateCsdCredentials(array $csdCredentials): array
+    {
+        $certificatePem = self::certificateDerToPem((string) ($csdCredentials['cer_contents'] ?? ''));
+        $certificateResource = openssl_x509_read($certificatePem);
+        if ($certificateResource === false) {
+            throw new RuntimeException('No se pudo leer el certificado CSD.');
+        }
+
+        $certificateInfo = openssl_x509_parse($certificateResource);
+        if ($certificateInfo === false) {
+            throw new RuntimeException('No se pudo interpretar el certificado CSD.');
+        }
+
+        $privateKeyPem = self::privateKeyDerToPem(
+            (string) ($csdCredentials['key_contents'] ?? ''),
+            (string) ($csdCredentials['password'] ?? '')
+        );
+
+        $privateKey = openssl_pkey_get_private($privateKeyPem, (string) ($csdCredentials['password'] ?? ''));
+        if ($privateKey === false) {
+            throw new RuntimeException('No se pudo abrir la llave privada del CSD. Revisa la contraseña.');
+        }
+
+        $certificatePublicKey = openssl_pkey_get_public($certificatePem);
+        if ($certificatePublicKey === false) {
+            throw new RuntimeException('No se pudo leer la llave pública del certificado CSD.');
+        }
+
+        $privateKeyDetails = openssl_pkey_get_details($privateKey);
+        $certificateKeyDetails = openssl_pkey_get_details($certificatePublicKey);
+
+        if (
+            !is_array($privateKeyDetails)
+            || !is_array($certificateKeyDetails)
+            || empty($privateKeyDetails['key'])
+            || empty($certificateKeyDetails['key'])
+        ) {
+            throw new RuntimeException('No se pudieron validar las llaves del CSD.');
+        }
+
+        if (!hash_equals((string) $privateKeyDetails['key'], (string) $certificateKeyDetails['key'])) {
+            throw new RuntimeException('La llave .key no corresponde al certificado .cer proporcionado.');
+        }
+
+        return $certificateInfo;
+    }
+
     private static function localCadenaOriginalPath(): string
     {
         $minimal = BASE_PATH . '/resources/cfdi/cadenaoriginal_minima_4_0.xslt';

@@ -255,6 +255,7 @@ class BusinessSettingsController
 
         $this->validateCsdUpload($keyUpload, 'key');
         $this->validateCsdUpload($cerUpload, 'cer');
+        $this->validateCsdPair($keyUpload['tmp_name'], $cerUpload['tmp_name'], $csdPassword);
         $certificateInfo = $this->extractCertificateMetadata($cerUpload['tmp_name']);
         $apiCredentials = $this->provisionEfApiCredentials($business, $certificateInfo, $existing, $runtimeSettings);
         $efAssignFeedback = $apiCredentials['feedback_message'] ?? null;
@@ -397,6 +398,25 @@ class BusinessSettingsController
             'valid_from' => $validFrom,
             'valid_to' => $validTo,
         ];
+    }
+
+    private function validateCsdPair(string $keyPath, string $certificatePath, string $password): void
+    {
+        $keyContents = @file_get_contents($keyPath);
+        if ($keyContents === false || $keyContents === '') {
+            throw new RuntimeException('No se pudo leer el archivo .key del CSD.');
+        }
+
+        $certificateContents = @file_get_contents($certificatePath);
+        if ($certificateContents === false || $certificateContents === '') {
+            throw new RuntimeException('No se pudo leer el archivo .cer del CSD.');
+        }
+
+        EfectosFiscalesService::validateCsdCredentials([
+            'key_contents' => $keyContents,
+            'cer_contents' => $certificateContents,
+            'password' => $password,
+        ]);
     }
 
     /**
@@ -550,13 +570,23 @@ class BusinessSettingsController
             || str_contains(strtolower($responseText), 'existe')
             || str_contains(strtolower($responseText), 'duplic');
 
-        if (($httpCode < 200 || $httpCode >= 300) && !$alreadyExists) {
+        if ($alreadyExists) {
+            AutofacturaLog::log(
+                'ef_assign_user_error',
+                null,
+                (int) $business['id'],
+                'El servicio reportó que el usuario ya existe: ' . $responseText
+            );
+            throw new RuntimeException('No se pudo registrar la cuenta de timbrado porque el servicio reportó que el usuario ya existe. Revisa la cuenta previa en EfectosFiscales antes de guardar el CSD.');
+        }
+
+        if ($httpCode < 200 || $httpCode >= 300) {
             AutofacturaLog::log('ef_assign_user_error', null, (int) $business['id'], 'HTTP ' . $httpCode . ': ' . $responseText);
             throw new RuntimeException('No se pudo registrar la cuenta de timbrado automáticamente. Respuesta del servicio: ' . $responseText);
         }
 
         AutofacturaLog::log(
-            $alreadyExists ? 'ef_assign_user_exists' : 'ef_assign_user_ok',
+            'ef_assign_user_ok',
             null,
             (int) $business['id'],
             'HTTP ' . $httpCode . ' - Usuario timbrado: ' . $username . '. Respuesta: ' . $responseText
@@ -566,9 +596,7 @@ class BusinessSettingsController
             'api_url' => $apiUrl,
             'api_user' => $username,
             'api_password' => $password,
-            'feedback_message' => $alreadyExists
-                ? 'Cuenta de timbrado validada: el usuario ya existía en EfectosFiscales y se reutilizó correctamente.'
-                : 'Cuenta de timbrado creada correctamente en EfectosFiscales.',
+            'feedback_message' => 'Cuenta de timbrado creada correctamente en EfectosFiscales.',
         ];
     }
 }
