@@ -17,11 +17,11 @@ $router->get('/register', [AuthController::class, 'showRegister']);
 $router->post('/register', [AuthController::class, 'register']);
 $router->get('/verify-account/{token}', [AuthController::class, 'verifyEmail']);
 $router->get('/logout', [AuthController::class, 'logout']);
-$router->get('/webhooks/clip', function() {
+$router->get('/webhooks/stripe', function() {
     http_response_code(405);
     echo 'Método no permitido';
 });
-$router->post('/webhooks/clip', [StampPurchasesController::class, 'webhook']);
+$router->post('/webhooks/stripe', [StampPurchasesController::class, 'webhook']);
 
 // Autofactura pública (link para clientes)
 $router->get('/f/{token}/efos-check', [PublicInvoiceController::class, 'efosCheck']);

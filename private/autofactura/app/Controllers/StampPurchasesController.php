@@ -10,18 +10,17 @@ class StampPurchasesController
     private const LOW_STOCK_ALERT_COOLDOWN = 86400;
     private const DEFAULT_EF_TRANSFER_URL = 'https://efectosfiscales.mx/assign/api_transferir_timbres.php';
     private const PACKAGES = [
-        'pkg_test' => ['name' => 'Paquete de prueba (1 factura)', 'credits' => 1, 'subtotal' => 0.86],
-        'pkg_20' => ['name' => 'Paquete de 20 timbres', 'credits' => 20, 'subtotal' => 100.00],
-        'pkg_50' => ['name' => 'Paquete de 50 timbres', 'credits' => 50, 'subtotal' => 225.00],
-        'pkg_150' => ['name' => 'Paquete de 150 timbres', 'credits' => 150, 'subtotal' => 600.00],
-        'pkg_500' => ['name' => 'Paquete de 500 timbres', 'credits' => 500, 'subtotal' => 1750.00],
+        'pkg_test' => ['name' => 'Prueba', 'credits' => 1, 'subtotal' => 0.86, 'extra_price' => 1.00],
+        'starter' => ['name' => 'Starter', 'credits' => 30, 'subtotal' => 128.45, 'extra_price' => 5.50],
+        'crecimiento' => ['name' => 'Crecimiento', 'credits' => 100, 'subtotal' => 343.97, 'extra_price' => 5.00],
+        'negocio' => ['name' => 'Negocio', 'credits' => 300, 'subtotal' => 861.21, 'extra_price' => 4.50],
     ];
 
     public function __construct()
     {
         $action = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
-        $isPublicWebhook = str_contains($path, '/webhooks/clip');
+        $isPublicWebhook = str_contains($path, '/webhooks/stripe') || str_contains($path, '/webhooks/clip');
 
         if (!$isPublicWebhook) {
             AuthMiddleware::check();
@@ -35,10 +34,12 @@ class StampPurchasesController
         $transferTargets = [];
         $transferSearch = trim((string) ($_GET['transfer_search'] ?? ''));
         $creditSnapshot = $this->resolveDisplayedCredits($businessId);
+        $activeSubscription = $this->resolveActiveSubscriptionSummary($businessId);
+        $planChangePreview = $this->resolvePlanChangePreview($businessId, $activeSubscription);
 
         $packages = [];
         foreach (self::PACKAGES as $key => $package) {
-            $packages[] = ['key' => $key] + $this->packageAmounts($package);
+            $packages[] = ['key' => $key, 'stripe_price_id' => $this->stripePriceIdForPackage($key)] + $this->packageAmounts($package);
         }
 
         if (is_superuser()) {
@@ -63,8 +64,140 @@ class StampPurchasesController
             'packages' => $packages,
             'purchases' => StampPurchase::getByBusiness($businessId, 20),
             'allCheckoutOrders' => is_superuser() ? StampPurchase::getAllCheckoutOrders(100) : [],
-            'clipEnabled' => $this->isClipConfigured(),
+            'stripeEnabled' => $this->isStripeConfigured(),
+            'activeSubscription' => $activeSubscription,
+            'planChangePreview' => $planChangePreview,
         ]);
+    }
+
+    private function resolveActiveSubscriptionSummary(int $businessId): ?array
+    {
+        if ($businessId <= 0 || is_superuser()) {
+            return null;
+        }
+
+        $purchase = StampPurchase::findLatestActiveStripeSubscriptionByBusiness($businessId);
+        if (!$purchase) {
+            return null;
+        }
+
+        $subscriptionId = trim((string) ($purchase['payment_request_id'] ?? ''));
+        if ($subscriptionId === '') {
+            return null;
+        }
+
+        $result = StripeService::getSubscription($subscriptionId);
+        if (empty($result['success'])) {
+            return [
+                'package_name' => (string) ($purchase['package_name'] ?? 'Suscripción'),
+                'status' => (string) ($purchase['clip_status'] ?? 'desconocido'),
+                'renews_at' => null,
+                'cancel_at' => null,
+                'cancel_at_period_end' => false,
+                'source' => 'local',
+            ];
+        }
+
+        $subscription = StripeService::extractSubscriptionData($result);
+        $liveStatus = (string) ($subscription['subscription_status'] ?? ($purchase['clip_status'] ?? 'desconocido'));
+        if (!$this->isDisplayableSubscriptionStatus($liveStatus)) {
+            return null;
+        }
+
+        return [
+            'package_name' => (string) ($purchase['package_name'] ?? 'Suscripción'),
+            'status' => $liveStatus,
+            'subscription_id' => $subscriptionId,
+            'subscription_item_id' => (string) ($subscription['subscription_item_id'] ?? ''),
+            'current_price_id' => (string) ($subscription['current_price_id'] ?? ''),
+            'current_package_key' => $this->packageKeyByStripePriceId((string) ($subscription['current_price_id'] ?? '')),
+            'credits' => (int) ($purchase['credits'] ?? 0),
+            'renews_at' => $this->formatStripeTimestamp((int) ($subscription['current_period_end'] ?? 0)),
+            'period_started_at' => $this->formatStripeTimestamp((int) ($subscription['current_period_start'] ?? 0)),
+            'cancel_at' => $this->formatStripeTimestamp((int) ($subscription['cancel_at'] ?? 0)),
+            'cancel_at_period_end' => !empty($subscription['cancel_at_period_end']),
+            'source' => 'stripe',
+        ];
+    }
+
+    private function resolvePlanChangePreview(int $businessId, ?array $activeSubscription): ?array
+    {
+        if ($businessId <= 0 || is_superuser() || !$activeSubscription) {
+            return null;
+        }
+
+        $targetPackageKey = trim((string) ($_GET['change_plan'] ?? ''));
+        if ($targetPackageKey === '') {
+            return null;
+        }
+
+        $package = self::PACKAGES[$targetPackageKey] ?? null;
+        if (!$package) {
+            return null;
+        }
+
+        $targetPriceId = $this->stripePriceIdForPackage($targetPackageKey);
+        $subscriptionId = trim((string) ($activeSubscription['subscription_id'] ?? ''));
+        if ($targetPriceId === null || $subscriptionId === '') {
+            return null;
+        }
+
+        $currentPackageKey = (string) ($activeSubscription['current_package_key'] ?? '');
+        if ($currentPackageKey !== '' && $currentPackageKey === $targetPackageKey) {
+            return [
+                'target_package' => ['key' => $targetPackageKey] + $this->packageAmounts($package),
+                'current_package_name' => (string) ($activeSubscription['package_name'] ?? 'Plan actual'),
+                'same_plan' => true,
+            ];
+        }
+
+        $currentCredits = max(0, (int) ($activeSubscription['credits'] ?? 0));
+        $targetCredits = max(0, (int) ($package['credits'] ?? 0));
+        if ($targetCredits <= $currentCredits) {
+            return [
+                'target_package' => ['key' => $targetPackageKey] + $this->packageAmounts($package),
+                'current_package_name' => (string) ($activeSubscription['package_name'] ?? 'Plan actual'),
+                'error' => 'Por ahora solo está habilitado subir a un plan mayor desde una suscripción activa.',
+            ];
+        }
+
+        if (!$this->isActiveStripeSubscriptionStatus((string) ($activeSubscription['status'] ?? ''))) {
+            return null;
+        }
+
+        $prorationDate = time();
+        $previewResult = StripeService::previewSubscriptionPriceChange($subscriptionId, $targetPriceId, $prorationDate);
+        if (empty($previewResult['success'])) {
+            return [
+                'target_package' => ['key' => $targetPackageKey] + $this->packageAmounts($package),
+                'current_package_name' => (string) ($activeSubscription['package_name'] ?? 'Plan actual'),
+                'error' => (string) ($previewResult['message'] ?? 'No se pudo calcular el prorrateo en Stripe.'),
+            ];
+        }
+
+        $preview = StripeService::extractUpcomingInvoicePreview($previewResult);
+        return [
+            'target_package' => ['key' => $targetPackageKey] + $this->packageAmounts($package),
+            'current_package_name' => (string) ($activeSubscription['package_name'] ?? 'Plan actual'),
+            'same_plan' => false,
+            'amount_due_now' => (float) ($preview['amount_due'] ?? 0),
+            'proration_total' => (float) ($preview['proration_total'] ?? 0),
+            'currency' => (string) ($preview['currency'] ?? 'MXN'),
+            'next_total' => (float) (($this->packageAmounts($package))['total'] ?? 0),
+            'additional_credits_now' => max(0, $targetCredits - $currentCredits),
+            'proration_date' => $prorationDate,
+        ];
+    }
+
+    private function formatStripeTimestamp(int $timestamp): ?string
+    {
+        if ($timestamp <= 0) {
+            return null;
+        }
+
+        $dt = new DateTime('@' . $timestamp);
+        $dt->setTimezone(new DateTimeZone(env('APP_TIMEZONE', 'America/Mexico_City')));
+        return $dt->format('d/m/Y H:i');
     }
 
     private function resolveDisplayedCredits(int $businessId): array
@@ -184,55 +317,84 @@ class StampPurchasesController
             Router::redirect('/stamp-purchases');
         }
 
-        if (!$this->isClipConfigured()) {
-            flash('error', 'Clip no está configurado todavía en el entorno.');
+        if (!$this->isStripeConfigured()) {
+            flash('error', 'Stripe no está configurado todavía en el entorno.');
             Router::redirect('/stamp-purchases');
+        }
+
+        $stripePriceId = $this->stripePriceIdForPackage($packageKey);
+        if ($stripePriceId === null) {
+            flash('error', 'Esta suscripción todavía no tiene un Price ID de Stripe configurado.');
+            Router::redirect('/stamp-purchases');
+        }
+
+        $activeSubscription = $this->resolveActiveSubscriptionSummary($businessId);
+        if ($activeSubscription && $this->isActiveStripeSubscriptionStatus((string) ($activeSubscription['status'] ?? ''))) {
+            $currentPackageKey = trim((string) ($activeSubscription['current_package_key'] ?? ''));
+            if ($currentPackageKey !== '' && $currentPackageKey === $packageKey) {
+                flash('info', 'Ya tienes activo ese mismo plan.');
+                Router::redirect('/stamp-purchases');
+            }
+
+            $confirmedUpgrade = (int) ($_POST['confirm_upgrade'] ?? 0) === 1;
+            if (!$confirmedUpgrade) {
+                Router::redirect('/stamp-purchases?change_plan=' . urlencode($packageKey));
+            }
+
+            $this->changeActiveSubscriptionPlan($businessId, $activeSubscription, $packageKey, $package, $stripePriceId);
+            return;
         }
 
         $purchaseId = StampPurchase::createPendingCheckout($businessId, [
             'package_name' => $package['name'],
             'credits' => $package['credits'],
             'amount' => $this->packageAmounts($package)['total'],
-            'payment_method' => 'Clip',
+            'payment_method' => 'Stripe',
             'status' => 'pending',
         ]);
 
-        $successUrl = url('stamp-purchases/return?purchase=' . $purchaseId . '&result=success');
-        $errorUrl = url('stamp-purchases/return?purchase=' . $purchaseId . '&result=error');
-        $defaultUrl = url('stamp-purchases/return?purchase=' . $purchaseId . '&result=default');
+        $successUrl = url('stamp-purchases/return?purchase=' . $purchaseId . '&result=success&session_id={CHECKOUT_SESSION_ID}');
+        $cancelUrl = url('stamp-purchases/return?purchase=' . $purchaseId . '&result=cancelled');
 
-        $clipResult = ClipService::createCheckoutLink(
-            (float) $this->packageAmounts($package)['total'],
-            $package['name'],
+        $stripeResult = StripeService::createSubscriptionCheckout(
+            $stripePriceId,
             $successUrl,
-            $errorUrl,
-            $defaultUrl
+            $cancelUrl,
+            [
+                'purchase_id' => (string) $purchaseId,
+                'business_id' => (string) $businessId,
+                'package_key' => $packageKey,
+                'package_name' => (string) $package['name'],
+                'credits' => (string) ((int) $package['credits']),
+            ],
+            auth_business_email(),
+            (string) $purchaseId
         );
 
-        if (empty($clipResult['success'])) {
+        if (empty($stripeResult['success'])) {
             StampPurchase::update($purchaseId, [
                 'status' => 'failed',
-                'notes' => (string) ($clipResult['message'] ?? 'No se pudo generar el link de pago.'),
+                'notes' => (string) ($stripeResult['message'] ?? 'No se pudo generar la suscripción.'),
             ]);
-            flash('error', 'No se pudo generar el link de pago con Clip: ' . ($clipResult['message'] ?? 'error desconocido'));
+            flash('error', 'No se pudo generar el checkout de Stripe: ' . ($stripeResult['message'] ?? 'error desconocido'));
             Router::redirect('/stamp-purchases');
         }
 
-        $paymentLink = ClipService::extractPaymentLinkData($clipResult);
+        $checkout = StripeService::extractCheckoutSessionData($stripeResult);
         StampPurchase::update($purchaseId, [
-            'payment_request_id' => $paymentLink['payment_request_id'] ?: null,
-            'payment_request_url' => $paymentLink['payment_request_url'] ?: null,
-            'clip_status' => $paymentLink['clip_status'] ?: null,
+            'payment_request_id' => $checkout['subscription_id'] ?: ($checkout['checkout_session_id'] ?: null),
+            'payment_request_url' => $checkout['checkout_session_url'] ?: null,
+            'clip_status' => $checkout['subscription_status'] ?: ($checkout['checkout_session_status'] ?: null),
         ]);
 
         AutofacturaLog::log(
             'stamp_checkout_created',
             null,
             $businessId,
-            'Orden #' . $purchaseId . ' creada en Clip'
+            'Suscripción #' . $purchaseId . ' creada en Stripe'
         );
 
-        header('Location: ' . $paymentLink['payment_request_url']);
+        header('Location: ' . $checkout['checkout_session_url']);
         exit;
     }
 
@@ -249,33 +411,16 @@ class StampPurchasesController
 
         $result = strtolower(trim((string) ($_GET['result'] ?? 'default')));
 
-        if (($purchase['status'] ?? '') !== 'paid' && !empty($purchase['payment_request_id'])) {
-            $statusResult = ClipService::getCheckoutStatus((string) $purchase['payment_request_id']);
-            if (!empty($statusResult['success'])) {
-                $statusData = ClipService::extractPaymentLinkData($statusResult);
+        $sessionId = trim((string) ($_GET['session_id'] ?? ''));
+        if ($sessionId !== '' && ($purchase['status'] ?? '') !== 'paid') {
+            $sessionResult = StripeService::getCheckoutSession($sessionId);
+            if (!empty($sessionResult['success'])) {
+                $sessionData = StripeService::extractCheckoutSessionData($sessionResult);
                 StampPurchase::update($purchaseId, [
-                    'clip_status' => $statusData['clip_status'] ?: ($purchase['clip_status'] ?? null),
+                    'payment_request_id' => $sessionData['subscription_id'] ?: ($purchase['payment_request_id'] ?? null),
+                    'payment_request_url' => $sessionData['checkout_session_url'] ?: ($purchase['payment_request_url'] ?? null),
+                    'clip_status' => $sessionData['subscription_status'] ?: ($purchase['clip_status'] ?? null),
                 ]);
-
-                if (ClipService::isPaidStatus($statusData['clip_status'] ?? null)) {
-                    try {
-                        $this->transferPurchaseCreditsViaEf($purchase);
-                        StampPurchase::markAsPaid($purchaseId, $statusData['clip_status'] ?? null, (string) ($purchase['payment_request_id'] ?? ''));
-                        $this->syncBusinessStampCreditsFromEf((int) ($purchase['business_id'] ?? 0));
-                        $this->ensureSuperuserInvoiceLink($purchaseId);
-                        flash('success', 'Pago confirmado. Ya acreditamos tus timbres.');
-                        Router::redirect('/stamp-purchases');
-                    } catch (Throwable $e) {
-                        app_log('No se pudo surtir la compra de timbres #' . $purchaseId . ': ' . $e->getMessage(), 'error');
-                        $updatedPurchase = StampPurchase::find($purchaseId);
-                        if (($updatedPurchase['status'] ?? '') === 'paid') {
-                            flash('success', 'El pago ya fue confirmado y tus timbres se acreditaron correctamente.');
-                        } else {
-                            flash('error', 'El pago ya fue confirmado, pero no se pudieron acreditar tus timbres automáticamente. Contacta al administrador.');
-                        }
-                        Router::redirect('/stamp-purchases');
-                    }
-                }
             }
         }
 
@@ -290,10 +435,10 @@ class StampPurchasesController
             }
         }
 
-        if ($result === 'error') {
-            flash('error', 'El pago no se completó. Puedes intentarlo nuevamente.');
+        if ($result === 'cancelled') {
+            flash('error', 'La suscripción no se completó. Puedes intentarlo nuevamente.');
         } else {
-            flash('info', 'Aún estamos validando el pago con Clip. Si ya pagaste, actualiza en unos segundos.');
+            flash('info', 'Aún estamos validando tu suscripción en Stripe. Si ya completaste el checkout, actualiza en unos segundos.');
         }
 
         Router::redirect('/stamp-purchases');
@@ -373,62 +518,38 @@ class StampPurchasesController
         @file_put_contents($this->webhookLogPath(), json_encode($logEntry, JSON_UNESCAPED_SLASHES) . PHP_EOL, FILE_APPEND | LOCK_EX);
 
         if (!$this->isWebhookAuthorized($raw)) {
+            app_log('Webhook Stripe rechazado por firma inválida. Evento=' . (string) ($payload['type'] ?? 'desconocido'), 'warning');
             http_response_code(401);
             header('Content-Type: application/json; charset=UTF-8');
             echo json_encode(['ok' => false, 'message' => 'Webhook no autorizado.'], JSON_UNESCAPED_UNICODE);
             return;
         }
 
-        $paymentRequestId = (string) (
-            $payload['payment_request_id']
-            ?? $payload['data']['payment_request_id']
-            ?? $payload['resource']['payment_request_id']
-            ?? ''
-        );
+        $eventType = (string) ($payload['type'] ?? '');
+        $eventObject = $payload['data']['object'] ?? [];
+        app_log('Webhook Stripe recibido y autorizado. Evento=' . $eventType, 'info');
 
-        $clipStatus = (string) (
-            $payload['status']
-            ?? $payload['data']['status']
-            ?? $payload['resource']['status']
-            ?? ''
-        );
+        try {
+            switch ($eventType) {
+                case 'checkout.session.completed':
+                    $this->handleStripeCheckoutCompleted($eventObject);
+                    break;
 
-        if ($paymentRequestId === '') {
-            http_response_code(200);
-            header('Content-Type: application/json; charset=UTF-8');
-            echo json_encode(['ok' => true, 'message' => 'Webhook recibido sin payment_request_id.'], JSON_UNESCAPED_UNICODE);
-            return;
-        }
+                case 'invoice.paid':
+                    $this->handleStripeInvoicePaid($eventObject);
+                    break;
 
-        $purchase = StampPurchase::findByPaymentRequestId($paymentRequestId);
-        if (!$purchase) {
-            http_response_code(200);
-            header('Content-Type: application/json; charset=UTF-8');
-            echo json_encode(['ok' => true, 'message' => 'Sin orden asociada.'], JSON_UNESCAPED_UNICODE);
-            return;
-        }
+                case 'invoice.payment_failed':
+                    $this->handleStripeInvoicePaymentFailed($eventObject);
+                    break;
 
-        StampPurchase::update((int) $purchase['id'], [
-            'clip_status' => $clipStatus !== '' ? $clipStatus : ($purchase['clip_status'] ?? null),
-            'payment_reference' => $paymentRequestId,
-        ]);
-
-        if (($purchase['status'] ?? '') === 'paid') {
-            http_response_code(200);
-            header('Content-Type: application/json; charset=UTF-8');
-            echo json_encode(['ok' => true, 'message' => 'Compra ya acreditada.'], JSON_UNESCAPED_UNICODE);
-            return;
-        }
-
-        if (ClipService::isPaidStatus($clipStatus)) {
-            try {
-                $this->transferPurchaseCreditsViaEf($purchase);
-                StampPurchase::markAsPaid((int) $purchase['id'], $clipStatus, $paymentRequestId);
-                $this->syncBusinessStampCreditsFromEf((int) ($purchase['business_id'] ?? 0));
-                $this->ensureSuperuserInvoiceLink((int) $purchase['id']);
-            } catch (Throwable $e) {
-                app_log('Webhook Clip sin surtido de compra #' . (int) $purchase['id'] . ': ' . $e->getMessage(), 'error');
+                case 'customer.subscription.updated':
+                case 'customer.subscription.deleted':
+                    $this->handleStripeSubscriptionUpdated($eventObject);
+                    break;
             }
+        } catch (Throwable $e) {
+            app_log('Webhook Stripe con error interno: ' . $e->getMessage(), 'error');
         }
 
         http_response_code(200);
@@ -436,46 +557,355 @@ class StampPurchasesController
         echo json_encode(['ok' => true], JSON_UNESCAPED_UNICODE);
     }
 
-    private function isClipConfigured(): bool
+    private function isStripeConfigured(): bool
     {
-        $token = trim((string) env('CLIP_API_TOKEN', ''));
-        $apiKey = trim((string) env('CLIP_API_KEY', ''));
-        $apiSecret = trim((string) (env('CLIP_API_SECRET', '') ?: env('CLIP_SECRET_KEY', '')));
-
-        return $token !== '' || ($apiKey !== '' && $apiSecret !== '');
+        $secretKey = trim((string) (env('STRIPE_SECRET_KEY', '') ?: env('STRIPE_API_KEY', '')));
+        return $secretKey !== '';
     }
 
     private function isWebhookAuthorized(string $rawBody): bool
     {
-        $expectedToken = trim((string) env('CLIP_WEBHOOK_TOKEN', ''));
-        $providedToken = trim((string) ($_SERVER['HTTP_X_WEBHOOK_TOKEN'] ?? ''));
-        if ($expectedToken !== '' && $providedToken !== '' && hash_equals($expectedToken, $providedToken)) {
-            return true;
-        }
-
-        $secret = trim((string) env('CLIP_WEBHOOK_SECRET', ''));
-        if ($secret !== '') {
-            $headerName = trim((string) env('CLIP_WEBHOOK_SIGNATURE_HEADER', 'X-Clip-Signature'));
-            $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $headerName));
-            $signature = trim((string) ($_SERVER[$serverKey] ?? ''));
-            if ($signature !== '') {
-                $expectedHex = hash_hmac('sha256', $rawBody, $secret);
-                $expectedPrefixed = 'sha256=' . $expectedHex;
-                return hash_equals($expectedHex, $signature) || hash_equals($expectedPrefixed, $signature);
-            }
-        }
-
-        return false;
+        $signature = trim((string) ($_SERVER['HTTP_STRIPE_SIGNATURE'] ?? ''));
+        return StripeService::verifyWebhookSignature($rawBody, $signature);
     }
 
     private function webhookLogPath(): string
     {
-        $configured = trim((string) env('CLIP_WEBHOOK_LOG', ''));
+        $configured = trim((string) env('STRIPE_WEBHOOK_LOG', ''));
         if ($configured !== '') {
             return $configured;
         }
 
-        return STORAGE_PATH . '/logs/clip_webhook.log';
+        return STORAGE_PATH . '/logs/stripe_webhook.log';
+    }
+
+    private function stripePriceIdForPackage(string $packageKey): ?string
+    {
+        $envKey = 'STRIPE_PRICE_' . strtoupper($packageKey);
+        $priceId = trim((string) env($envKey, ''));
+        return $priceId !== '' ? $priceId : null;
+    }
+
+    private function packageKeyByStripePriceId(string $priceId): ?string
+    {
+        $priceId = trim($priceId);
+        if ($priceId === '') {
+            return null;
+        }
+
+        foreach (array_keys(self::PACKAGES) as $packageKey) {
+            if ($this->stripePriceIdForPackage($packageKey) === $priceId) {
+                return $packageKey;
+            }
+        }
+
+        return null;
+    }
+
+    private function isActiveStripeSubscriptionStatus(string $status): bool
+    {
+        return in_array(strtolower(trim($status)), ['active', 'trialing'], true);
+    }
+
+    private function isDisplayableSubscriptionStatus(string $status): bool
+    {
+        return in_array(strtolower(trim($status)), ['active', 'trialing', 'past_due', 'unpaid'], true);
+    }
+
+    private function changeActiveSubscriptionPlan(
+        int $businessId,
+        array $activeSubscription,
+        string $packageKey,
+        array $package,
+        string $stripePriceId
+    ): void {
+        $subscriptionId = trim((string) ($activeSubscription['subscription_id'] ?? ''));
+        if ($subscriptionId === '') {
+            flash('error', 'No se encontró el identificador de la suscripción activa.');
+            Router::redirect('/stamp-purchases');
+        }
+
+        $currentCredits = max(0, (int) ($activeSubscription['credits'] ?? 0));
+        $targetCredits = max(0, (int) ($package['credits'] ?? 0));
+        $additionalCredits = max(0, $targetCredits - $currentCredits);
+        if ($additionalCredits <= 0) {
+            flash('error', 'Por ahora solo está habilitado subir a un plan mayor.');
+            Router::redirect('/stamp-purchases');
+        }
+
+        $prorationDate = (int) ($_POST['proration_date'] ?? time());
+        if ($prorationDate <= 0) {
+            $prorationDate = time();
+        }
+
+        $previewResult = StripeService::previewSubscriptionPriceChange($subscriptionId, $stripePriceId, $prorationDate);
+        if (empty($previewResult['success'])) {
+            flash('error', 'No se pudo calcular el ajuste del cambio de plan: ' . ($previewResult['message'] ?? 'error desconocido'));
+            Router::redirect('/stamp-purchases');
+        }
+
+        $preview = StripeService::extractUpcomingInvoicePreview($previewResult);
+        $purchaseId = StampPurchase::createPendingCheckout($businessId, [
+            'package_name' => 'Cambio de plan a ' . (string) ($package['name'] ?? 'suscripción'),
+            'credits' => max(1, $additionalCredits),
+            'amount' => max(0, (float) ($preview['amount_due'] ?? 0)),
+            'payment_request_id' => $subscriptionId,
+            'clip_status' => (string) ($activeSubscription['status'] ?? 'active'),
+            'payment_method' => 'Stripe',
+            'status' => 'pending',
+            'notes' => 'Prorrateo por cambio de plan desde ' . (string) ($activeSubscription['package_name'] ?? 'plan anterior') . '.',
+        ]);
+
+        $metadata = [
+            'business_id' => (string) $businessId,
+            'package_key' => $packageKey,
+            'package_name' => (string) ($package['name'] ?? 'Suscripción'),
+            'credits' => (string) $targetCredits,
+        ];
+
+        $updateResult = StripeService::updateSubscriptionPrice(
+            $subscriptionId,
+            $stripePriceId,
+            $metadata,
+            $metadata,
+            $prorationDate
+        );
+
+        if (empty($updateResult['success'])) {
+            StampPurchase::update($purchaseId, [
+                'status' => 'failed',
+                'notes' => (string) ($updateResult['message'] ?? 'No se pudo actualizar la suscripción en Stripe.'),
+            ]);
+            flash('error', 'No se pudo cambiar el plan en Stripe: ' . ($updateResult['message'] ?? 'error desconocido'));
+            Router::redirect('/stamp-purchases');
+        }
+
+        AutofacturaLog::log(
+            'stamp_checkout_created',
+            null,
+            $businessId,
+            'Cambio de plan Stripe para suscripción ' . $subscriptionId . ' hacia ' . (string) ($package['name'] ?? 'nuevo plan')
+        );
+
+        $amountDueNow = number_format((float) ($preview['amount_due'] ?? 0), 2);
+        flash('success', 'Plan actualizado. Stripe cobrará el ajuste proporcional de $' . $amountDueNow . ' MXN y en la siguiente renovación cobrará el plan completo.');
+        Router::redirect('/stamp-purchases');
+    }
+
+    private function handleStripeCheckoutCompleted(array $session): void
+    {
+        $purchaseId = (int) ($session['client_reference_id'] ?? $session['metadata']['purchase_id'] ?? 0);
+        if ($purchaseId <= 0) {
+            app_log('Stripe checkout.session.completed sin purchase_id utilizable.', 'warning');
+            return;
+        }
+
+        $purchase = StampPurchase::find($purchaseId);
+        if (!$purchase) {
+            return;
+        }
+
+        $subscriptionId = trim((string) ($session['subscription'] ?? ''));
+        $checkoutStatus = trim((string) ($session['status'] ?? ''));
+
+        $updateData = [
+            'payment_request_id' => $subscriptionId !== '' ? $subscriptionId : ($purchase['payment_request_id'] ?? null),
+            'payment_request_url' => (string) ($purchase['payment_request_url'] ?? null),
+            'clip_status' => $checkoutStatus !== '' ? $checkoutStatus : ($purchase['clip_status'] ?? null),
+        ];
+        StampPurchase::update($purchaseId, $updateData);
+        app_log('Stripe checkout.session.completed actualizado para compra #' . $purchaseId . ' suscripcion=' . ($subscriptionId !== '' ? $subscriptionId : 'N/A'), 'info');
+    }
+
+    private function handleStripeInvoicePaid(array $invoice): void
+    {
+        $invoiceId = trim((string) ($invoice['id'] ?? ''));
+        if ($invoiceId === '' || StampPurchase::findByPaymentReference($invoiceId)) {
+            if ($invoiceId !== '') {
+                app_log('Stripe invoice.paid ignorado por duplicado. invoice=' . $invoiceId, 'info');
+            }
+            return;
+        }
+
+        $subscriptionId = $this->extractInvoiceSubscriptionId($invoice);
+        if ($subscriptionId === '') {
+            app_log('Stripe invoice.paid sin subscription id. invoice=' . $invoiceId, 'warning');
+            return;
+        }
+
+        $metadata = $this->extractInvoiceSubscriptionMetadata($invoice);
+        $purchaseId = (int) ($metadata['purchase_id'] ?? 0);
+        $subscriptionStatus = $this->extractSubscriptionStatusFromInvoice($invoice);
+        if ($subscriptionStatus === '') {
+            $subscriptionStatus = 'active';
+        }
+
+        $purchase = $purchaseId > 0 ? StampPurchase::find($purchaseId) : null;
+        if (!$purchase) {
+            $purchase = StampPurchase::findLatestPendingByPaymentRequestId($subscriptionId);
+        }
+        if (!$purchase) {
+            $purchase = StampPurchase::findLatestByPaymentRequestId($subscriptionId);
+        }
+
+        if (!$purchase) {
+            app_log('Stripe invoice.paid sin compra asociada. invoice=' . $invoiceId . ' subscription=' . $subscriptionId . ' purchase_id=' . $purchaseId, 'warning');
+            return;
+        }
+
+        $currentPurchaseId = (int) ($purchase['id'] ?? 0);
+        $isRenewal = ($purchase['status'] ?? '') === 'paid';
+
+        if ($isRenewal) {
+            $renewalPackageName = trim((string) ($metadata['package_name'] ?? ($purchase['package_name'] ?? 'Suscripción de timbres')));
+            $renewalCredits = max(0, (int) ($metadata['credits'] ?? ($purchase['credits'] ?? 0)));
+            $currentPurchaseId = StampPurchase::createPendingCheckout((int) $purchase['business_id'], [
+                'package_name' => $renewalPackageName,
+                'credits' => $renewalCredits,
+                'amount' => round(((float) ($invoice['amount_paid'] ?? 0)) / 100, 2),
+                'payment_request_id' => $subscriptionId,
+                'payment_request_url' => (string) ($purchase['payment_request_url'] ?? ''),
+                'clip_status' => $subscriptionStatus,
+                'payment_method' => 'Stripe',
+                'payment_reference' => $invoiceId,
+                'status' => 'pending',
+                'notes' => 'Renovación automática de Stripe.',
+            ]);
+            $purchase = StampPurchase::find($currentPurchaseId) ?? $purchase;
+            app_log('Stripe invoice.paid creó renovación #' . $currentPurchaseId . ' para suscripción ' . $subscriptionId, 'info');
+        } else {
+            StampPurchase::update($currentPurchaseId, [
+                'payment_request_id' => $subscriptionId,
+                'clip_status' => $subscriptionStatus ?: (string) ($purchase['clip_status'] ?? null),
+                'payment_reference' => $invoiceId,
+            ]);
+            $purchase = StampPurchase::find($currentPurchaseId) ?? $purchase;
+            app_log('Stripe invoice.paid asociado a compra existente #' . $currentPurchaseId . ' subscription=' . $subscriptionId, 'info');
+        }
+
+        $this->fulfillPaidPurchase(
+            $purchase,
+            $subscriptionStatus,
+            $invoiceId
+        );
+        app_log('Stripe invoice.paid surtió correctamente compra #' . $currentPurchaseId . ' invoice=' . $invoiceId, 'info');
+    }
+
+    private function handleStripeInvoicePaymentFailed(array $invoice): void
+    {
+        $subscriptionId = $this->extractInvoiceSubscriptionId($invoice);
+        if ($subscriptionId === '') {
+            return;
+        }
+
+        $purchase = StampPurchase::findLatestByPaymentRequestId($subscriptionId);
+        if (!$purchase) {
+            return;
+        }
+
+        $update = [
+            'clip_status' => 'past_due',
+        ];
+        if (($purchase['status'] ?? '') === 'pending') {
+            $update['status'] = 'failed';
+        }
+
+        StampPurchase::update((int) $purchase['id'], $update);
+    }
+
+    private function handleStripeSubscriptionUpdated(array $subscription): void
+    {
+        $subscriptionId = trim((string) ($subscription['id'] ?? ''));
+        if ($subscriptionId === '') {
+            return;
+        }
+
+        $purchase = StampPurchase::findLatestByPaymentRequestId($subscriptionId);
+        if (!$purchase) {
+            return;
+        }
+
+        $status = trim((string) ($subscription['status'] ?? ''));
+        $update = [
+            'clip_status' => $status !== '' ? $status : ($purchase['clip_status'] ?? null),
+        ];
+
+        if (($subscription['cancel_at_period_end'] ?? false) || $status === 'canceled' || $status === 'unpaid') {
+            $update['status'] = 'cancelled';
+        }
+
+        StampPurchase::update((int) $purchase['id'], $update);
+    }
+
+    private function fulfillPaidPurchase(array $purchase, ?string $providerStatus, ?string $reference): void
+    {
+        $purchaseId = (int) ($purchase['id'] ?? 0);
+        if ($purchaseId <= 0) {
+            throw new RuntimeException('No existe una compra válida para acreditar.');
+        }
+
+        StampPurchase::update($purchaseId, [
+            'clip_status' => $providerStatus ?: ($purchase['clip_status'] ?? null),
+            'payment_reference' => $reference ?: ($purchase['payment_reference'] ?? null),
+        ]);
+
+        $purchase = StampPurchase::find($purchaseId) ?? $purchase;
+        app_log('Iniciando surtido de compra #' . $purchaseId . ' negocio=' . (int) ($purchase['business_id'] ?? 0) . ' creditos=' . (int) ($purchase['credits'] ?? 0), 'info');
+        $this->transferPurchaseCreditsViaEf($purchase);
+        StampPurchase::markAsPaid($purchaseId, $providerStatus, $reference);
+        $this->syncBusinessStampCreditsFromEf((int) ($purchase['business_id'] ?? 0));
+        $this->ensureSuperuserInvoiceLink($purchaseId);
+    }
+
+    private function extractInvoiceSubscriptionMetadata(array $invoice): array
+    {
+        $sources = [
+            $invoice['parent']['subscription_details']['metadata'] ?? null,
+            $invoice['lines']['data'][0]['metadata'] ?? null,
+        ];
+
+        foreach ($sources as $source) {
+            if (is_array($source) && !empty($source)) {
+                return $source;
+            }
+        }
+
+        return [];
+    }
+
+    private function extractInvoiceSubscriptionId(array $invoice): string
+    {
+        $candidates = [
+            $invoice['subscription'] ?? null,
+            $invoice['parent']['subscription_details']['subscription'] ?? null,
+            $invoice['lines']['data'][0]['parent']['subscription_item_details']['subscription'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $subscriptionId = trim((string) $candidate);
+            if ($subscriptionId !== '') {
+                return $subscriptionId;
+            }
+        }
+
+        return '';
+    }
+
+    private function extractSubscriptionStatusFromInvoice(array $invoice): string
+    {
+        $candidates = [
+            $invoice['subscription_details']['status'] ?? null,
+            $invoice['parent']['subscription_details']['status'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $status = trim((string) $candidate);
+            if ($status !== '') {
+                return $status;
+            }
+        }
+
+        return $invoice['status'] === 'paid' ? 'active' : '';
     }
 
     private function packageAmounts(array $package): array
@@ -757,20 +1187,17 @@ class StampPurchasesController
             Router::redirect('/stamp-purchases');
         }
 
-        if (!ClipService::isPaidStatus((string) ($purchase['clip_status'] ?? ''))) {
-            flash('error', 'Esta transacción aún no aparece como pagada en Clip.');
+        if (!StripeService::isProvisionedStatus((string) ($purchase['clip_status'] ?? ''))) {
+            flash('error', 'Esta transacción aún no aparece como activa en Stripe.');
             Router::redirect('/stamp-purchases');
         }
 
         try {
-            $this->transferPurchaseCreditsViaEf($purchase);
-            StampPurchase::markAsPaid(
-                $purchaseId,
+            $this->fulfillPaidPurchase(
+                $purchase,
                 (string) ($purchase['clip_status'] ?? ''),
-                (string) ($purchase['payment_request_id'] ?? '')
+                (string) ($purchase['payment_reference'] ?? $purchase['payment_request_id'] ?? '')
             );
-            $this->syncBusinessStampCreditsFromEf((int) ($purchase['business_id'] ?? 0));
-            $this->ensureSuperuserInvoiceLink($purchaseId);
 
             AutofacturaLog::log(
                 'stamp_purchase_manual_transfer',

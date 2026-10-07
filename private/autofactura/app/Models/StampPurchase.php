@@ -96,6 +96,50 @@ class StampPurchase extends BaseModel
         return self::findBy('payment_request_id', $paymentRequestId);
     }
 
+    public static function findLatestByPaymentRequestId(string $paymentRequestId): ?array
+    {
+        return Database::fetchOne(
+            "SELECT * FROM `stamp_purchases`
+             WHERE `payment_request_id` = :payment_request_id
+             ORDER BY `id` DESC
+             LIMIT 1",
+            ['payment_request_id' => $paymentRequestId]
+        );
+    }
+
+    public static function findLatestPendingByPaymentRequestId(string $paymentRequestId): ?array
+    {
+        return Database::fetchOne(
+            "SELECT * FROM `stamp_purchases`
+             WHERE `payment_request_id` = :payment_request_id
+               AND `status` = 'pending'
+             ORDER BY `id` DESC
+             LIMIT 1",
+            ['payment_request_id' => $paymentRequestId]
+        );
+    }
+
+    public static function findByPaymentReference(string $paymentReference): ?array
+    {
+        return self::findBy('payment_reference', $paymentReference);
+    }
+
+    public static function findLatestActiveStripeSubscriptionByBusiness(int $businessId): ?array
+    {
+        return Database::fetchOne(
+            "SELECT *
+             FROM `stamp_purchases`
+             WHERE `business_id` = :business_id
+               AND `payment_method` = 'Stripe'
+               AND `payment_request_id` IS NOT NULL
+               AND `payment_request_id` <> ''
+               AND `clip_status` IN ('active', 'trialing', 'past_due', 'unpaid')
+             ORDER BY COALESCE(`paid_at`, `created_at`) DESC, `id` DESC
+             LIMIT 1",
+            ['business_id' => $businessId]
+        );
+    }
+
     public static function hasColumn(string $column): bool
     {
         if (array_key_exists($column, self::$columnCache)) {
@@ -170,7 +214,7 @@ class StampPurchase extends BaseModel
             'payment_request_id' => trim((string) ($data['payment_request_id'] ?? '')) ?: null,
             'payment_request_url' => trim((string) ($data['payment_request_url'] ?? '')) ?: null,
             'clip_status' => trim((string) ($data['clip_status'] ?? '')) ?: null,
-            'payment_method' => trim((string) ($data['payment_method'] ?? 'Clip')) ?: 'Clip',
+            'payment_method' => trim((string) ($data['payment_method'] ?? 'Stripe')) ?: 'Stripe',
             'payment_reference' => trim((string) ($data['payment_reference'] ?? '')) ?: null,
             'status' => trim((string) ($data['status'] ?? 'pending')) ?: 'pending',
             'notes' => trim((string) ($data['notes'] ?? '')) ?: null,

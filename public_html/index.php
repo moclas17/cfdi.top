@@ -51,7 +51,7 @@ require_once APP_PATH . '/Services/EfectosFiscalesService.php';
 require_once APP_PATH . '/Services/EfosValidationService.php';
 require_once APP_PATH . '/Services/MailgunService.php';
 require_once APP_PATH . '/Services/MensajesXyzService.php';
-require_once APP_PATH . '/Services/ClipService.php';
+require_once APP_PATH . '/Services/StripeService.php';
 
 // Helpers
 require_once APP_PATH . '/Helpers/Router.php';

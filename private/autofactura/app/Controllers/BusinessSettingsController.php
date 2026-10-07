@@ -502,8 +502,6 @@ class BusinessSettingsController
             throw new RuntimeException('No se pudo preparar el alta automática del timbrado porque faltan datos del certificado o del negocio.');
         }
 
-        $username = 'cfditop' . $businessId . $rfc;
-        $password = 'cfditop' . $businessId . $rfc . '#';
         $apiUrl = trim((string) ($existing['api_url'] ?? ''));
         if ($apiUrl === '') {
             $apiUrl = trim((string) env('EF_DEFAULT_API_URL', self::DEFAULT_EF_API_URL));
@@ -520,6 +518,8 @@ class BusinessSettingsController
             throw new RuntimeException('No está disponible cURL en el servidor para registrar la cuenta de timbrado.');
         }
 
+        $username = 'cfditop' . $businessId . $rfc;
+        $password = $username . '#';
         $payload = [
             'usuario' => [
                 'nombre_completo' => $legalName,
@@ -577,28 +577,79 @@ class BusinessSettingsController
         }
 
         $ok = $decoded['ok'] ?? null;
-        if ($ok !== true && $ok !== 1 && $ok !== '1') {
-            $serviceMessage = trim((string) ($decoded['message'] ?? ''));
-            if ($serviceMessage === '') {
-                $serviceMessage = $responseText;
-            }
+        if ($ok === true || $ok === 1 || $ok === '1') {
+            AutofacturaLog::log(
+                'ef_assign_user_ok',
+                null,
+                (int) $business['id'],
+                'HTTP ' . $httpCode . ' - Usuario timbrado: ' . $username . '. Respuesta: ' . $responseText
+            );
 
-            AutofacturaLog::log('ef_assign_user_error', null, (int) $business['id'], 'Servicio EF: ' . $serviceMessage);
-            throw new RuntimeException('No se pudo registrar la cuenta de timbrado automáticamente. Respuesta del servicio: ' . $serviceMessage);
+            return [
+                'api_url' => $apiUrl,
+                'api_user' => $username,
+                'api_password' => $password,
+                'feedback_message' => 'Cuenta de timbrado creada correctamente en EfectosFiscales.',
+            ];
         }
 
-        AutofacturaLog::log(
-            'ef_assign_user_ok',
-            null,
-            (int) $business['id'],
-            'HTTP ' . $httpCode . ' - Usuario timbrado: ' . $username . '. Respuesta: ' . $responseText
-        );
+        $serviceMessage = trim((string) ($decoded['message'] ?? ''));
+        if ($serviceMessage === '') {
+            $serviceMessage = $responseText;
+        }
 
-        return [
-            'api_url' => $apiUrl,
-            'api_user' => $username,
-            'api_password' => $password,
-            'feedback_message' => 'Cuenta de timbrado creada correctamente en EfectosFiscales.',
-        ];
+        if ($this->isEfDuplicateUsernameMessage($serviceMessage)) {
+            AutofacturaLog::log(
+                'ef_assign_user_exists',
+                null,
+                (int) $business['id'],
+                'EF reportó usuario existente. Validando con wsGetCredit: ' . $username
+            );
+
+            $creditCheck = EfectosFiscalesService::wsGetCredit([
+                'api_url' => $apiUrl,
+                'api_user' => $username,
+                'api_password' => $password,
+                'api_key' => '',
+            ]);
+
+            if (!empty($creditCheck['success'])) {
+                AutofacturaLog::log(
+                    'ef_assign_user_ok',
+                    null,
+                    (int) $business['id'],
+                    'Usuario EF existente validado con wsGetCredit: ' . $username . '. Respuesta: ' . json_encode($creditCheck, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                );
+
+                return [
+                    'api_url' => $apiUrl,
+                    'api_user' => $username,
+                    'api_password' => $password,
+                    'feedback_message' => 'La cuenta de timbrado ya existía en EfectosFiscales y fue validada correctamente.',
+                ];
+            }
+
+            AutofacturaLog::log(
+                'ef_assign_user_error',
+                null,
+                (int) $business['id'],
+                'EF reportó usuario existente pero wsGetCredit no lo validó para ' . $username . '. Alta=' . $serviceMessage . ' | wsGetCredit=' . (string) ($creditCheck['message'] ?? 'sin detalle')
+            );
+        } else {
+            AutofacturaLog::log('ef_assign_user_error', null, (int) $business['id'], 'Servicio EF: ' . $serviceMessage);
+        }
+
+        throw new RuntimeException('No se pudo registrar la cuenta de timbrado automáticamente. Respuesta del servicio: ' . $serviceMessage);
+    }
+
+    private function isEfDuplicateUsernameMessage(string $message): bool
+    {
+        $normalized = strtolower(trim($message));
+        return $normalized !== '' && (
+            str_contains($normalized, 'ya existe')
+            || str_contains($normalized, 'usuario diferente')
+            || str_contains($normalized, 'existe registrado')
+            || str_contains($normalized, 'usuario ya existe')
+        );
     }
 }

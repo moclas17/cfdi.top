@@ -78,13 +78,81 @@ ob_start();
                     <p class="text-muted mb-1">Este saldo funciona como inventario principal de timbres. Las compras aprobadas de los negocios se descuentan de aquí.</p>
                     <p class="text-muted mb-0">Como superadmin, tú eres quien puede agregar timbres nuevos al sistema manualmente.</p>
                 <?php else: ?>
-                    <p class="text-muted mb-1">Compra un paquete, paga con Clip y cuando el pago se confirme acreditamos tus timbres automáticamente.</p>
-                    <p class="text-muted mb-0">Cada CFDI timbrado consume 1 timbre.</p>
+                    <p class="text-muted mb-1">Suscríbete a un plan mensual en Stripe y acreditaremos tus timbres automáticamente en cada cobro exitoso.</p>
+                    <p class="text-muted mb-0">Cada CFDI timbrado consume 1 timbre y cada renovación repone el saldo incluido en tu plan.</p>
                 <?php endif; ?>
             </div>
         </div>
     </div>
 </div>
+
+<?php if (!$isSuperuser && !empty($activeSubscription)): ?>
+    <div class="card-af mb-4">
+        <div class="card-body">
+            <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+                <div>
+                    <h5 class="mb-1"><i class="bi bi-arrow-repeat me-2"></i>Suscripción actual</h5>
+                    <div class="text-muted">
+                        <?= e((string) ($activeSubscription['package_name'] ?? 'Suscripción')) ?>
+                        <span class="mx-2">•</span>
+                        Estado: <strong><?= e((string) strtoupper((string) ($activeSubscription['status'] ?? 'desconocido'))) ?></strong>
+                    </div>
+                </div>
+                <div class="text-lg-end">
+                    <?php if (!empty($activeSubscription['renews_at'])): ?>
+                        <div class="fw-semibold">Próxima renovación: <?= e((string) $activeSubscription['renews_at']) ?></div>
+                    <?php endif; ?>
+                    <?php if (!empty($activeSubscription['cancel_at_period_end'])): ?>
+                        <div class="text-warning small">La suscripción está programada para cancelarse al final del periodo.</div>
+                    <?php elseif (!empty($activeSubscription['cancel_at'])): ?>
+                        <div class="text-warning small">Cancelación programada para: <?= e((string) $activeSubscription['cancel_at']) ?></div>
+                    <?php else: ?>
+                        <div class="text-muted small">Tu plan sigue activo hasta la próxima renovación automática.</div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+<?php endif; ?>
+
+<?php if (!$isSuperuser && !empty($planChangePreview)): ?>
+    <div class="alert alert-info mb-4">
+        <?php if (!empty($planChangePreview['same_plan'])): ?>
+            Ese paquete ya es tu plan actual.
+        <?php elseif (!empty($planChangePreview['error'])): ?>
+            No pudimos calcular el ajuste de cambio de plan: <?= e((string) $planChangePreview['error']) ?>
+        <?php else: ?>
+            <div class="fw-semibold mb-2">Confirmar cambio de plan</div>
+            <div class="mb-2">
+                Vas a cambiar de <strong><?= e((string) ($planChangePreview['current_package_name'] ?? 'tu plan actual')) ?></strong>
+                a <strong><?= e((string) (($planChangePreview['target_package']['name'] ?? 'nuevo plan'))) ?></strong>.
+            </div>
+            <div class="mb-2">
+                Hoy Stripe cobrará aproximadamente <strong><?= format_money((float) ($planChangePreview['amount_due_now'] ?? 0)) ?> <?= e((string) ($planChangePreview['currency'] ?? 'MXN')) ?></strong>
+                por el ajuste proporcional de este periodo.
+            </div>
+            <div class="mb-3">
+                En la siguiente renovación se cobrará el plan completo:
+                <strong><?= format_money((float) ($planChangePreview['next_total'] ?? 0)) ?> MXN</strong>.
+                <?php if (($planChangePreview['additional_credits_now'] ?? 0) > 0): ?>
+                    Acreditaremos <strong><?= (int) $planChangePreview['additional_credits_now'] ?></strong> timbres adicionales en cuanto Stripe confirme el cobro del ajuste.
+                <?php endif; ?>
+            </div>
+            <div class="d-flex flex-column flex-md-row gap-2">
+                <form method="POST" action="<?= url('stamp-purchases/checkout') ?>">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="package_key" value="<?= e((string) ($planChangePreview['target_package']['key'] ?? '')) ?>">
+                    <input type="hidden" name="confirm_upgrade" value="1">
+                    <input type="hidden" name="proration_date" value="<?= (int) ($planChangePreview['proration_date'] ?? time()) ?>">
+                    <button type="submit" class="btn btn-af">
+                        <i class="bi bi-check2-circle me-1"></i> Confirmar cambio
+                    </button>
+                </form>
+                <a href="<?= url('stamp-purchases') ?>" class="btn btn-af-outline">Cancelar</a>
+            </div>
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
 
 <?php if ($isSuperuser): ?>
     <div class="card-af mb-4">
@@ -200,9 +268,9 @@ ob_start();
     </div>
 <?php endif; ?>
 
-<?php if (!$clipEnabled): ?>
+<?php if (!$stripeEnabled): ?>
     <div class="alert alert-warning">
-        Clip aún no está configurado en el entorno. Agrega tus credenciales antes de habilitar compras en línea.
+        Stripe aún no está configurado en el entorno. Agrega tus credenciales y Price IDs antes de habilitar suscripciones.
     </div>
 <?php endif; ?>
 
@@ -213,16 +281,34 @@ ob_start();
             <div class="stamp-package-card">
                 <div class="stamp-package-title"><?= e($package['name']) ?></div>
                 <div class="stamp-package-credits"><?= (int) $package['credits'] ?></div>
-                <div class="text-muted small mb-2">timbres</div>
-                <div class="small text-muted">Subtotal: <?= format_money((float) $package['subtotal']) ?></div>
+                <div class="text-muted small mb-2">facturas</div>
+                <div class="small text-muted">Subtotal mensual: <?= format_money((float) $package['subtotal']) ?></div>
                 <div class="small text-muted">IVA 16%: <?= format_money((float) $package['iva']) ?></div>
-                <div class="stamp-package-price mt-2">Total: <?= format_money((float) $package['total']) ?> MXN</div>
+                <div class="stamp-package-price mt-2">Total mensual: <?= format_money((float) $package['total']) ?> MXN</div>
+                <?php if (isset($package['extra_price'])): ?>
+                    <div class="small text-muted mb-3">Extra: <?= format_money((float) $package['extra_price']) ?></div>
+                <?php endif; ?>
 
                 <form method="POST" action="<?= url('stamp-purchases/checkout') ?>">
                     <?= csrf_field() ?>
                     <input type="hidden" name="package_key" value="<?= e((string) $package['key']) ?>">
-                    <button type="submit" class="btn btn-af w-100" <?= !$clipEnabled ? 'disabled' : '' ?>>
-                        <i class="bi bi-credit-card me-1"></i> Comprar
+                    <button
+                        type="submit"
+                        class="btn btn-af w-100"
+                        <?= (
+                            !$stripeEnabled
+                            || empty($package['stripe_price_id'])
+                            || (!empty($activeSubscription) && !empty($activeSubscription['current_package_key']) && $activeSubscription['current_package_key'] === $package['key'])
+                        ) ? 'disabled' : '' ?>
+                    >
+                        <i class="bi bi-arrow-repeat me-1"></i>
+                        <?php if (!empty($activeSubscription) && !empty($activeSubscription['current_package_key']) && $activeSubscription['current_package_key'] === $package['key']): ?>
+                            Plan actual
+                        <?php elseif (!empty($activeSubscription) && in_array(strtolower((string) ($activeSubscription['status'] ?? '')), ['active', 'trialing'], true)): ?>
+                            Cambiar plan
+                        <?php else: ?>
+                            Suscribirme
+                        <?php endif; ?>
                     </button>
                 </form>
             </div>
@@ -239,7 +325,7 @@ ob_start();
         </div>
 
         <?php if (empty($purchases)): ?>
-            <div class="text-center py-4 text-muted"><?= $isSuperuser ? 'Aún no hay recargas manuales registradas.' : 'Aún no hay compras de timbres registradas.' ?></div>
+            <div class="text-center py-4 text-muted"><?= $isSuperuser ? 'Aún no hay recargas manuales registradas.' : 'Aún no hay cargos de suscripciones registrados.' ?></div>
         <?php else: ?>
             <div class="table-responsive">
                 <table class="table table-af mb-0">
@@ -249,7 +335,7 @@ ob_start();
                             <th>Timbres</th>
                             <th>Monto</th>
                             <th>Estatus</th>
-                            <th>Clip</th>
+                            <th>Stripe</th>
                             <th>Fecha</th>
                             <th>Factura</th>
                         </tr>
@@ -263,7 +349,7 @@ ob_start();
                                 <td>
                                     <?php
                                     $status = (string) ($purchase['status'] ?? 'pending');
-                                    $clipPaid = ClipService::isPaidStatus((string) ($purchase['clip_status'] ?? ''));
+                                    $clipPaid = StripeService::isProvisionedStatus((string) ($purchase['clip_status'] ?? ''));
                                     $displayStatus = $status;
                                     $badgeClass = match ($status) {
                                         'paid' => 'badge-capturada',
@@ -368,10 +454,10 @@ ob_start();
                 <span class="text-muted small">Total: <?= count($allCheckoutOrders) ?></span>
             </div>
 
-            <p class="text-muted small mb-3">Aquí ves todos los links creados para compra de timbres, quién los generó y cuáles realmente quedaron pagados.</p>
+            <p class="text-muted small mb-3">Aquí ves todas las suscripciones creadas para timbres, quién las generó y cuáles ya se acreditaron.</p>
 
             <?php if (empty($allCheckoutOrders)): ?>
-                <div class="text-center py-4 text-muted">Todavía no se han generado links de pago con Clip.</div>
+                <div class="text-center py-4 text-muted">Todavía no se han generado suscripciones con Stripe.</div>
             <?php else: ?>
                 <div class="table-responsive">
                     <table class="table table-af mb-0">
@@ -382,7 +468,7 @@ ob_start();
                                 <th>Timbres</th>
                                 <th>Importe</th>
                                 <th>Estatus</th>
-                                <th>Clip</th>
+                                <th>Stripe</th>
                                 <th>Fecha</th>
                                 <th>Acciones</th>
                             </tr>
@@ -398,7 +484,7 @@ ob_start();
                                     default => 'badge-pendiente',
                                 };
                                 $linkUrl = trim((string) ($order['payment_request_url'] ?? ''));
-                                $clipPaid = ClipService::isPaidStatus((string) ($order['clip_status'] ?? ''));
+                                $clipPaid = StripeService::isProvisionedStatus((string) ($order['clip_status'] ?? ''));
                                 $needsManualTransfer = $clipPaid && $status !== 'paid';
                                 if ($needsManualTransfer) {
                                     $displayStatus = 'Pagado';
