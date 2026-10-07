@@ -46,7 +46,7 @@ ob_start();
                         <div class="card-body">
                             <h6 class="text-muted mb-3"><i class="bi bi-shield-lock me-1"></i> Sellos CSD del emisor</h6>
                             <div class="alert alert-warning py-3" role="alert">
-                                Primero sube tu archivo <strong>.key</strong>, tu archivo <strong>.cer</strong> y la contraseña del CSD. Cuando el certificado sea válido, AutoFactura guarda los datos fiscales del emisor y prepara automáticamente tu cuenta de timbrado.
+                                Primero sube tu archivo <strong>.key</strong>, tu archivo <strong>.cer</strong> y la contraseña del CSD. La <strong>e.firma (FIEL) no es válida para timbrar</strong> y será rechazada. Cuando el CSD sea válido, AutoFactura guarda los datos fiscales del emisor y prepara automáticamente tu cuenta de timbrado.
                             </div>
 
                             <div class="mb-3">
@@ -97,7 +97,7 @@ ob_start();
                                            placeholder="<?= !empty($settings['csd_password']) ? 'Guardada. Captura una nueva junto con ambos archivos para reemplazar.' : '••••••••' ?>">
                                 </div>
                                 <div class="col-12">
-                                    <small class="text-muted">Para registrar o reemplazar los sellos debes subir los tres elementos al mismo tiempo. Tamaño máximo por archivo: 1 MB.</small>
+                                    <small class="text-muted">Para registrar o reemplazar los sellos debes subir los tres elementos del CSD descargado de CertiSAT al mismo tiempo. No uses los archivos de la e.firma. Tamaño máximo por archivo: 1 MB.</small>
                                 </div>
                                 <?php if ($hasCsdConfigured): ?>
                                     <div class="col-12 d-flex flex-wrap gap-2">

@@ -1467,6 +1467,8 @@ class EfectosFiscalesService
             throw new RuntimeException('No se pudo interpretar el certificado CSD para el sellado.');
         }
 
+        self::assertCertificateIsCsd($certificateInfo);
+
         $comprobante = $document->getElementsByTagNameNS('http://www.sat.gob.mx/cfd/4', 'Comprobante')->item(0);
         if (!$comprobante instanceof DOMElement) {
             throw new RuntimeException('El XML no contiene el nodo Comprobante requerido para sellar.');
@@ -1558,6 +1560,8 @@ class EfectosFiscalesService
             throw new RuntimeException('No se pudo interpretar el certificado CSD.');
         }
 
+        self::assertCertificateIsCsd($certificateInfo);
+
         $privateKeyPem = self::privateKeyDerToPem(
             (string) ($csdCredentials['key_contents'] ?? ''),
             (string) ($csdCredentials['password'] ?? '')
@@ -1590,6 +1594,50 @@ class EfectosFiscalesService
         }
 
         return $certificateInfo;
+    }
+
+    /**
+     * Rechazar certificados de e.firma (FIEL) antes de intentar timbrar.
+     *
+     * El SAT no publica un indicador X.509 unico para todos los anos. Las FIEL
+     * anteriores declaran usos de autenticacion/cifrado; las actuales usan la
+     * unidad organizacional fija "Unidad". Los CSD solo se usan para firma y su
+     * OU identifica la unidad o sucursal solicitada en CertiSAT.
+     */
+    private static function assertCertificateIsCsd(array $certificateInfo): void
+    {
+        $extensions = is_array($certificateInfo['extensions'] ?? null)
+            ? $certificateInfo['extensions']
+            : [];
+        $subject = is_array($certificateInfo['subject'] ?? null)
+            ? $certificateInfo['subject']
+            : [];
+
+        $keyUsage = strtoupper(trim((string) ($extensions['keyUsage'] ?? '')));
+        $extendedKeyUsage = strtoupper(trim((string) ($extensions['extendedKeyUsage'] ?? '')));
+        $netscapeType = strtoupper(trim((string) ($extensions['nsCertType'] ?? '')));
+        $organizationalUnitValue = $subject['OU'] ?? '';
+        if (is_array($organizationalUnitValue)) {
+            $organizationalUnitValue = implode(' ', array_map('strval', $organizationalUnitValue));
+        }
+        $organizationalUnit = strtoupper(trim((string) $organizationalUnitValue));
+
+        $hasFielKeyUsage = str_contains($keyUsage, 'DATA ENCIPHERMENT')
+            || str_contains($keyUsage, 'KEY AGREEMENT')
+            || str_contains($extendedKeyUsage, 'E-MAIL PROTECTION')
+            || str_contains($extendedKeyUsage, 'TLS WEB CLIENT AUTHENTICATION')
+            || str_contains($netscapeType, 'SSL CLIENT')
+            || str_contains($netscapeType, 'S/MIME');
+        $hasCurrentFielUnit = $organizationalUnit === 'UNIDAD';
+
+        if (!$hasFielKeyUsage && !$hasCurrentFielUnit) {
+            return;
+        }
+
+        throw new RuntimeException(
+            'El certificado cargado corresponde a una e.firma (FIEL), no a un Certificado de Sello Digital (CSD). '
+            . 'Descarga de CertiSAT los archivos .cer y .key del CSD y vuelve a intentarlo.'
+        );
     }
 
     private static function localCadenaOriginalPath(): string
