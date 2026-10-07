@@ -607,9 +607,7 @@ class EfectosFiscalesService
         return [
             'success' => false,
             'message' => 'wsGetTicket SOAP sin respuesta válida.'
-                . (!empty($lastError) ? ' ' . $lastError : '')
-                . ' Usuario enviado: ' . $apiUser . '.'
-                . ' Contraseña enviada: ' . $apiPassword . '.'
+                . (!empty($lastError) ? ' ' . self::sanitizeProviderMessage($lastError) : '')
                 . ' API URL configurada: ' . $wsdlUrl . '.'
                 . ' Endpoint SOAP efectivo: ' . $soapLocation . '.',
         ];
@@ -782,7 +780,7 @@ class EfectosFiscalesService
         try {
             $request = (string) $client->__getLastRequest();
             $response = (string) $client->__getLastResponse();
-            app_log("SOAP {$method} request: " . substr($request, 0, 5000), 'debug');
+            app_log("SOAP {$method} request: " . self::redactSoapRequest($request), 'debug');
             app_log("SOAP {$method} response: " . substr($response, 0, 5000), 'debug');
         } catch (Throwable $e) {
             app_log("SOAP {$method} debug log error: " . $e->getMessage(), 'error');
@@ -1254,6 +1252,7 @@ class EfectosFiscalesService
 
     private static function decorateTicketErrorMessage(string $message, string $xmlDraft): string
     {
+        $message = self::sanitizeProviderMessage($message);
         $upper = mb_strtoupper($message, 'UTF-8');
         $hasStartIndex = str_contains($upper, 'STARTINDEX');
         $hasCredits = str_contains($upper, 'CREDITOS') || str_contains($upper, 'CRÉDITOS');
@@ -1265,7 +1264,62 @@ class EfectosFiscalesService
             $message .= ' | Diagnóstico: el XML enviado no está sellado (faltan Sello/Certificado/NoCertificado). El PAC de wsGetTicket requiere CFDI firmado.';
         }
 
+        if (str_contains($upper, 'NO ENCONTRADO EN LISTA LCO')) {
+            $xmlSerial = '';
+            $providerSerial = '';
+            if (preg_match('/\bNoCertificado="(\d+)"/i', $xmlDraft, $xmlMatch)) {
+                $xmlSerial = (string) ($xmlMatch[1] ?? '');
+            }
+            if (preg_match('/\bCertificado\s+(\d+)\s+no encontrado/i', $message, $providerMatch)) {
+                $providerSerial = (string) ($providerMatch[1] ?? '');
+            }
+
+            if ($xmlSerial !== '' && $providerSerial !== '' && !hash_equals($xmlSerial, $providerSerial)) {
+                $message .= ' | Diagnóstico: el XML fue sellado con el CSD ' . $xmlSerial
+                    . ', pero el PAC reportó el CSD ' . $providerSerial
+                    . '. Revisa que producción tenga cargado el mismo .cer/.key configurado para este negocio.';
+            } else {
+                $serial = $xmlSerial !== '' ? $xmlSerial : $providerSerial;
+                $message .= ' | Diagnóstico: el PAC no reconoce el CSD'
+                    . ($serial !== '' ? ' ' . $serial : '')
+                    . ' en su Lista de Contribuyentes Obligados (LCO). Debe cargarse un CSD activo en SAT o solicitar al PAC la actualización de su LCO.';
+            }
+        }
+
         return $message;
+    }
+
+    private static function sanitizeProviderMessage(string $message): string
+    {
+        $message = preg_replace(
+            '/\s*Usuario enviado:.*?(?=\s*API URL configurada:|\s*Endpoint SOAP efectivo:|$)/is',
+            '',
+            $message
+        ) ?? $message;
+        $message = preg_replace(
+            '/(contrase(?:ñ|n)a|password)\s*(?:enviada)?\s*:\s*[^\s|]+/iu',
+            '$1: [PROTEGIDA]',
+            $message
+        ) ?? $message;
+
+        return trim($message);
+    }
+
+    private static function redactSoapRequest(string $request): string
+    {
+        if ($request === '') {
+            return '[sin solicitud disponible]';
+        }
+
+        foreach (['username', 'password', 'xml'] as $element) {
+            $request = preg_replace(
+                '/(<(?:[A-Za-z0-9_-]+:)?' . $element . '\b[^>]*>).*?(<\/(?:[A-Za-z0-9_-]+:)?' . $element . '>)/is',
+                '$1[PROTEGIDO]$2',
+                $request
+            ) ?? $request;
+        }
+
+        return substr($request, 0, 5000);
     }
 
     private static function extractUuidCandidate(string $value): ?string
@@ -1418,6 +1472,8 @@ class EfectosFiscalesService
             throw new RuntimeException('El XML no contiene el nodo Comprobante requerido para sellar.');
         }
 
+        self::assertCertificateValidityForCfdi($certificateInfo, $comprobante->getAttribute('Fecha'));
+
         $comprobante->setAttribute('NoCertificado', self::certificateSerialNumber($certificateInfo));
         $comprobante->setAttribute('Certificado', base64_encode((string) $csdCredentials['cer_contents']));
 
@@ -1436,6 +1492,35 @@ class EfectosFiscalesService
         $comprobante->setAttribute('Sello', base64_encode($signature));
 
         return $document->saveXML() ?: $xml;
+    }
+
+    private static function assertCertificateValidityForCfdi(array $certificateInfo, string $issuedAt): void
+    {
+        $validFrom = isset($certificateInfo['validFrom_time_t']) ? (int) $certificateInfo['validFrom_time_t'] : 0;
+        $validTo = isset($certificateInfo['validTo_time_t']) ? (int) $certificateInfo['validTo_time_t'] : 0;
+        if ($validFrom <= 0 || $validTo <= 0) {
+            throw new RuntimeException('No fue posible comprobar la vigencia del certificado CSD.');
+        }
+
+        $timezone = new DateTimeZone((string) env('APP_TIMEZONE', 'America/Mexico_City'));
+        $issuedDate = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:s', $issuedAt, $timezone);
+        if (!$issuedDate instanceof DateTimeImmutable) {
+            throw new RuntimeException('La fecha de emisión del CFDI no tiene un formato válido.');
+        }
+
+        $issuedTimestamp = $issuedDate->getTimestamp();
+        if ($issuedTimestamp >= $validFrom && $issuedTimestamp <= $validTo) {
+            return;
+        }
+
+        $validFromDate = (new DateTimeImmutable('@' . $validFrom))->setTimezone($timezone);
+        $validToDate = (new DateTimeImmutable('@' . $validTo))->setTimezone($timezone);
+        throw new RuntimeException(
+            'La fecha de emisión ' . $issuedDate->format('d/m/Y H:i:s')
+            . ' está fuera de la vigencia del CSD ' . self::certificateSerialNumber($certificateInfo)
+            . ' (' . $validFromDate->format('d/m/Y H:i:s')
+            . ' a ' . $validToDate->format('d/m/Y H:i:s') . ').'
+        );
     }
 
     private static function createCadenaOriginal40(DOMDocument $document): string

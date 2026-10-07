@@ -25,7 +25,7 @@ class AutofacturaLog extends BaseModel
             'request_id'  => $requestId,
             'business_id' => $businessId,
             'action'      => $action,
-            'details'     => $details,
+            'details'     => self::sanitizeDetails($details),
             'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? null,
             'user_agent'  => $_SERVER['HTTP_USER_AGENT'] ?? null,
         ]);
@@ -36,7 +36,7 @@ class AutofacturaLog extends BaseModel
      */
     public static function getByRequest(int $requestId): array
     {
-        return self::where('request_id', $requestId, 'created_at', 'DESC');
+        return self::sanitizeRows(self::where('request_id', $requestId, 'created_at', 'DESC'));
     }
 
     public static function getLatestByRequestAndAction(int $requestId, string $action): ?array
@@ -48,10 +48,12 @@ class AutofacturaLog extends BaseModel
                 ORDER BY `created_at` DESC, `id` DESC
                 LIMIT 1";
 
-        return Database::fetchOne($sql, [
+        $row = Database::fetchOne($sql, [
             'request_id' => $requestId,
             'action' => $action,
         ]);
+
+        return $row === null ? null : self::sanitizeRow($row);
     }
 
     /**
@@ -59,7 +61,7 @@ class AutofacturaLog extends BaseModel
      */
     public static function getByBusiness(int $businessId): array
     {
-        return self::where('business_id', $businessId, 'created_at', 'DESC');
+        return self::sanitizeRows(self::where('business_id', $businessId, 'created_at', 'DESC'));
     }
 
     public static function hasActionForRequest(int $requestId, string $action): bool
@@ -113,6 +115,47 @@ class AutofacturaLog extends BaseModel
                 ORDER BY `created_at` DESC, `id` DESC
                 LIMIT {$limit}";
 
-        return Database::fetchAll($sql, $params);
+        return self::sanitizeRows(Database::fetchAll($sql, $params));
+    }
+
+    private static function sanitizeRows(array $rows): array
+    {
+        return array_map(static fn(array $row): array => self::sanitizeRow($row), $rows);
+    }
+
+    private static function sanitizeRow(array $row): array
+    {
+        if (array_key_exists('details', $row)) {
+            $row['details'] = self::sanitizeDetails(
+                is_string($row['details']) ? $row['details'] : null
+            );
+        }
+
+        return $row;
+    }
+
+    private static function sanitizeDetails(?string $details): ?string
+    {
+        if ($details === null || $details === '') {
+            return $details;
+        }
+
+        $details = preg_replace(
+            '/\s*Usuario enviado:.*?(?=\s*API URL configurada:|\s*Endpoint SOAP efectivo:|$)/is',
+            '',
+            $details
+        ) ?? $details;
+        $details = preg_replace(
+            '/(contrase(?:ñ|n)a|password)\s*(?:enviada)?\s*:\s*[^\s|]+/iu',
+            '$1: [PROTEGIDA]',
+            $details
+        ) ?? $details;
+        $details = preg_replace(
+            '/(Authorization\s*:\s*Bearer\s+)[A-Za-z0-9._~+\/-]+/i',
+            '$1[PROTEGIDO]',
+            $details
+        ) ?? $details;
+
+        return trim($details);
     }
 }
