@@ -107,6 +107,46 @@
             color: #919aa3;
             font-size: 0.85rem;
         }
+
+        .privacy-consent {
+            background: #f8f9fc;
+            border: 1px solid #e8ebed;
+            border-radius: 8px;
+            padding: 0.85rem 1rem;
+        }
+
+        .consent-option {
+            align-items: flex-start;
+            display: flex;
+            gap: 0.7rem;
+        }
+
+        .privacy-consent .form-check-input {
+            flex: 0 0 auto;
+            float: none;
+            height: 1.15rem;
+            margin: 0.15rem 0 0;
+            width: 1.15rem;
+        }
+
+        .privacy-consent .form-check-label {
+            color: #626b75;
+            font-size: 0.8rem;
+            line-height: 1.45;
+        }
+
+        .consent-note {
+            color: #919aa3;
+            display: block;
+            font-size: 0.74rem;
+            margin-top: 0.15rem;
+        }
+
+        .btn-register:disabled {
+            background: #aeb7c2;
+            box-shadow: none;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -171,9 +211,29 @@
                     <label class="form-label" for="password_confirm">Confirmar contraseña</label>
                     <input type="password" class="form-control" id="password_confirm" name="password_confirm" required minlength="6">
                 </div>
+
+                <div class="col-12">
+                    <div class="privacy-consent">
+                        <div class="consent-option">
+                            <input class="form-check-input" type="checkbox" value="1" id="privacy_accepted" name="privacy_accepted" required>
+                            <label class="form-check-label" for="privacy_accepted">
+                                He leído y acepto el
+                                <a href="<?= url('aviso-de-privacidad') ?>" target="_blank" rel="noopener noreferrer">Aviso de Privacidad</a>.
+                                <span class="consent-note">Obligatorio para crear la cuenta.</span>
+                            </label>
+                        </div>
+                        <div class="consent-option mt-3">
+                            <input class="form-check-input" type="checkbox" value="1" id="marketing_consent" name="marketing_consent">
+                            <label class="form-check-label" for="marketing_consent">
+                                Acepto recibir ofertas de folios, promociones y encuestas de satisfacción.
+                                <span class="consent-note">Opcional y desmarcado por defecto.</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            <button type="submit" class="btn btn-register mt-4">
+            <button type="submit" class="btn btn-register mt-3" id="register_submit" disabled>
                 <i class="bi bi-check-circle me-1"></i> Crear cuenta
             </button>
         </form>
@@ -184,5 +244,16 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const privacyAccepted = document.getElementById('privacy_accepted');
+        const registerSubmit = document.getElementById('register_submit');
+
+        function syncRegisterButton() {
+            registerSubmit.disabled = !privacyAccepted.checked;
+        }
+
+        privacyAccepted.addEventListener('change', syncRegisterButton);
+        syncRegisterButton();
+    </script>
 </body>
 </html>

@@ -6,6 +6,7 @@
 class AuthController
 {
     private const VERIFICATION_RESEND_COOLDOWN = 300;
+    private const PRIVACY_NOTICE_VERSION = '2026-07-22';
 
     /**
      * Mostrar formulario de login
@@ -98,6 +99,8 @@ class AuthController
         $phone = trim($_POST['phone'] ?? '');
         $password = $_POST['password'] ?? '';
         $passwordConfirm = $_POST['password_confirm'] ?? '';
+        $privacyAccepted = ($_POST['privacy_accepted'] ?? '') === '1';
+        $marketingConsent = ($_POST['marketing_consent'] ?? '') === '1';
 
         if ($name === '' || $email === '' || $password === '') {
             flash('error', 'Nombre, correo y contraseña son obligatorios.');
@@ -119,6 +122,11 @@ class AuthController
             Router::redirect('/register');
         }
 
+        if (!$privacyAccepted) {
+            flash('error', 'Debes leer y aceptar el Aviso de Privacidad para crear tu cuenta.');
+            Router::redirect('/register');
+        }
+
         $existing = Business::findByEmail($email);
         if ($existing) {
             flash('error', 'Ya existe una cuenta con ese correo.');
@@ -132,12 +140,22 @@ class AuthController
             'password' => $password,
             'role' => 'user',
             'is_active' => 1,
+            'privacy_accepted_at' => date('Y-m-d H:i:s'),
+            'privacy_version' => self::PRIVACY_NOTICE_VERSION,
+            'marketing_consent' => $marketingConsent ? 1 : 0,
+            'marketing_consent_at' => $marketingConsent ? date('Y-m-d H:i:s') : null,
         ]);
 
         $business = Business::find($newId);
         $mailSent = $business ? $this->sendVerificationEmail($business, false) : false;
 
-        AutofacturaLog::log('register_success', null, $newId, "Registro de cuenta: {$email}");
+        AutofacturaLog::log(
+            'register_success',
+            null,
+            $newId,
+            "Registro de cuenta: {$email}. Aviso de Privacidad aceptado: " . self::PRIVACY_NOTICE_VERSION .
+            '. Comunicaciones opcionales: ' . ($marketingConsent ? 'aceptadas' : 'no aceptadas')
+        );
         if ($mailSent) {
             flash('success', 'Cuenta creada. Revisa tu correo para verificarla antes de iniciar sesión.');
         } else {

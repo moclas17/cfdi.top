@@ -16,6 +16,10 @@ class Business extends BaseModel
         'email_verification_token',
         'email_verification_sent_at',
         'email_verified_at',
+        'privacy_accepted_at',
+        'privacy_version',
+        'marketing_consent',
+        'marketing_consent_at',
         'role',
         'is_active',
     ];
@@ -74,6 +78,10 @@ class Business extends BaseModel
             'email_verification_token' => $data['email_verification_token'] ?? self::generateToken(),
             'email_verification_sent_at' => $data['email_verification_sent_at'] ?? date('Y-m-d H:i:s'),
             'email_verified_at' => $data['email_verified_at'] ?? null,
+            'privacy_accepted_at' => $data['privacy_accepted_at'] ?? null,
+            'privacy_version' => trim($data['privacy_version'] ?? '') ?: null,
+            'marketing_consent' => !empty($data['marketing_consent']) ? 1 : 0,
+            'marketing_consent_at' => $data['marketing_consent_at'] ?? null,
             'role'      => in_array(($data['role'] ?? 'user'), ['user', 'superuser'], true) ? $data['role'] : 'user',
             'is_active' => (int) ($data['is_active'] ?? 1),
         ];
