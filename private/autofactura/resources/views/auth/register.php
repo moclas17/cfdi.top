@@ -135,13 +135,6 @@
             line-height: 1.45;
         }
 
-        .consent-note {
-            color: #919aa3;
-            display: block;
-            font-size: 0.74rem;
-            margin-top: 0.15rem;
-        }
-
         .btn-register:disabled {
             background: #aeb7c2;
             box-shadow: none;
@@ -217,16 +210,15 @@
                         <div class="consent-option">
                             <input class="form-check-input" type="checkbox" value="1" id="privacy_accepted" name="privacy_accepted" required>
                             <label class="form-check-label" for="privacy_accepted">
+                                <span class="text-danger" aria-hidden="true">*</span>
                                 He leído y acepto el
                                 <a href="<?= url('aviso-de-privacidad') ?>" target="_blank" rel="noopener noreferrer">Aviso de Privacidad</a>.
-                                <span class="consent-note">Obligatorio para crear la cuenta.</span>
                             </label>
                         </div>
                         <div class="consent-option mt-3">
                             <input class="form-check-input" type="checkbox" value="1" id="marketing_consent" name="marketing_consent">
                             <label class="form-check-label" for="marketing_consent">
                                 Acepto recibir ofertas de folios, promociones y encuestas de satisfacción.
-                                <span class="consent-note">Opcional y desmarcado por defecto.</span>
                             </label>
                         </div>
                     </div>
