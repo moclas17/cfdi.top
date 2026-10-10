@@ -108,6 +108,14 @@ $router->get('/', function() {
     view('public.landing');
 });
 
+$router->get('/aviso-de-privacidad', function() {
+    view('public.privacy');
+});
+
+$router->get('/terminos-de-servicio', function() {
+    view('public.terms');
+});
+
 // =============================================
 // Rutas Privadas (requieren autenticación)
 // =============================================

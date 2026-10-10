@@ -225,20 +225,20 @@
                         <div class="relative z-10">
                             <h3 class="text-3xl font-bold mb-2">Restaurantes</h3>
                             <p class="text-primary-fixed mb-6 max-w-md">Libera tu caja. Imprime un QR en el ticket y deja que el comensal haga el resto.</p>
-                            <a href="https://wa.me/5217471086815?text=Hola,%20me%20interesa%20automatizar%20la%20facturación%20de%20mi%20RESTAURANTE." class="inline-flex items-center px-4 py-2 bg-on-primary text-primary rounded-full text-sm font-bold">Ver solución</a>
+                            <a href="https://wa.me/525655514362?text=Hola,%20me%20interesa%20automatizar%20la%20facturación%20de%20mi%20RESTAURANTE." class="inline-flex items-center px-4 py-2 bg-on-primary text-primary rounded-full text-sm font-bold" target="_blank" rel="noopener noreferrer">Ver solución</a>
                         </div>
                     </div>
                     <div class="relative bg-surface-container-highest rounded-2xl overflow-hidden p-10 flex flex-col justify-end min-h-[300px]">
                         <img class="absolute inset-0 w-full h-full object-cover opacity-20" data-alt="Lobby of a boutique hotel with minimalist marble reception desk and warm ambient lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBal_zSeRTPpyQjLDKuFXtpJ-LONjlDt_-marmURyoshWSgVA0VPmR4REKeMblpKb_itCqWFIIp8JLIrrLtsks4NuuvJRNDXw-mreSigPfkKOkbGooDmAUNiVpiW18CFAIZVQcw1rha2XlZHniTWs0j4mU3ro2dsmD0UBLCTTmNh-Hxfb-pwIskSVKQ5OVLJD2srMb598vi1_UWVmGWzDEm6SuABMsHFKs_SbDmMXbfuLuVpCZHr0KxfHON83F2zVZueokvITQekg">
                         <div class="relative z-10">
                             <h3 class="text-2xl font-bold mb-2 text-on-surface">Hoteles</h3>
-                            <a href="https://wa.me/5217471086815?text=Hola,%20me%20interesa%20automatizar%20la%20facturación%20de%20mi%20HOTEL." class="inline-flex items-center px-4 py-2 bg-on-primary text-primary rounded-full text-sm font-bold">Ver solución</a>
+                            <a href="https://wa.me/525655514362?text=Hola,%20me%20interesa%20automatizar%20la%20facturación%20de%20mi%20HOTEL." class="inline-flex items-center px-4 py-2 bg-on-primary text-primary rounded-full text-sm font-bold" target="_blank" rel="noopener noreferrer">Ver solución</a>
                         </div>
                     </div>
                     <div class="relative bg-surface-container-lowest border border-outline-variant rounded-2xl overflow-hidden p-10 flex flex-col justify-end min-h-[300px]">
                         <div class="relative z-10">
                             <h3 class="text-2xl font-bold mb-2 text-primary">Gasolineras</h3>
-                            <a href="https://wa.me/5217471086815?text=Hola,%20me%20interesa%20automatizar%20la%20facturación%20de%20mi%20GASOLINERA." class="inline-flex items-center px-4 py-2 bg-on-primary text-primary rounded-full text-sm font-bold">Ver solución</a>
+                            <a href="https://wa.me/525655514362?text=Hola,%20me%20interesa%20automatizar%20la%20facturación%20de%20mi%20GASOLINERA." class="inline-flex items-center px-4 py-2 bg-on-primary text-primary rounded-full text-sm font-bold" target="_blank" rel="noopener noreferrer">Ver solución</a>
                             <div class="flex gap-2">
                                 <span class="p-2 bg-primary-fixed-dim rounded-lg"><span class="material-symbols-outlined text-primary">local_gas_station</span></span>
                                 <span class="p-2 bg-primary-fixed-dim rounded-lg"><span class="material-symbols-outlined text-primary">speed</span></span>
@@ -334,7 +334,7 @@
                     </div>
                 </div>
                 <div class="mt-10 text-center">
-                    <p class="text-on-surface-variant text-base">¿Facturas más de 1,000 al mes? <a class="text-primary font-bold hover:underline" href="<?= url('login') ?>">Contáctanos</a></p>
+                    <p class="text-on-surface-variant text-base">¿Facturas más de 1,000 al mes? <a class="text-primary font-bold hover:underline" href="https://wa.me/525655514362?text=Hola,%20me%20comunico%20desde%20cfdi.top%20y%20me%20gustaría%20recibir%20información." target="_blank" rel="noopener noreferrer">Contáctanos</a></p>
                 </div>
             </div>
         </section>
@@ -344,7 +344,7 @@
                 <h2 class="text-4xl md:text-5xl font-extrabold text-on-surface mb-8 tracking-tight">¿Listo para liberar a tu personal de las facturas?</h2>
                 <div class="flex flex-col sm:flex-row gap-6 justify-center">
                     <a class="px-10 py-5 bg-gradient-to-br from-primary to-primary-container text-on-primary rounded-full font-bold text-xl shadow-xl" href="<?= url('register') ?>">Crear mi cuenta gratis</a>
-                    <a class="px-10 py-5 border border-primary text-primary rounded-full font-bold text-xl hover:bg-primary-fixed transition-colors" href="https://wa.me/5217471086815?text=Hola,%20tengo%20dudas%20sobre%20AutoFactura%20y%20me%20gustaría%20hablar%20con%20un%20experto.">Hablar con un experto</a>
+                    <a class="px-10 py-5 border border-primary text-primary rounded-full font-bold text-xl hover:bg-primary-fixed transition-colors" href="https://wa.me/525655514362?text=Hola,%20tengo%20dudas%20sobre%20AutoFactura%20y%20me%20gustaría%20hablar%20con%20un%20experto." target="_blank" rel="noopener noreferrer">Hablar con un experto</a>
                 </div>
                 <p class="mt-8 text-on-surface-variant font-label text-sm italic">Sin tarjeta de crédito. Configuración en 15 minutos.</p>
             </div>
@@ -352,20 +352,31 @@
     </main>
 
     <footer class="w-full border-t border-slate-200 bg-slate-100">
-        <div class="flex flex-col md:flex-row justify-between items-center px-8 py-12 max-w-7xl mx-auto gap-6">
-            <div class="mb-8 md:mb-0 text-center md:text-left">
+        <div class="grid grid-cols-1 gap-10 px-8 py-12 max-w-7xl mx-auto text-center md:grid-cols-[1fr_1.15fr_auto] md:text-left">
+            <div>
                 <div class="flex items-center justify-center md:justify-start gap-3 mb-2">
                     <img src="<?= asset('img/autofactura.png') ?>" alt="cfdi.top" class="h-10 w-auto">
                     <div class="text-lg font-black text-slate-800">AutoFactura</div>
                 </div>
-                <div class="font-inter text-xs text-slate-500">© 2026 AutoFactura. Todos los derechos reservados. Cumple con SAT &amp; CFDI 4.0.</div>
+                <div class="font-inter text-xs text-slate-500">© 2026 AutoFactura. Todos los derechos reservados.<br>Cumple con SAT &amp; CFDI 4.0.</div>
             </div>
-            <div class="flex gap-8 font-inter text-xs text-slate-500 flex-wrap justify-center">
-                <a class="text-slate-500 hover:text-blue-500 transition-all hover:underline" href="#">Aviso de Privacidad</a>
-                <a class="text-slate-500 hover:text-blue-500 transition-all hover:underline" href="#">Términos de Servicio</a>
-                <a class="text-slate-500 hover:text-blue-500 transition-all hover:underline" href="<?= url('login') ?>">Contacto</a>
+
+            <address id="contacto" class="font-inter text-xs text-slate-500 not-italic">
+                <a class="group flex items-start justify-center gap-2 leading-relaxed transition-colors hover:text-blue-600 md:justify-start" href="https://www.google.com/maps/search/?api=1&amp;query=San%20Benito%20212A%2C%20Santa%20Sofía%2C%20Sector%20Élite%2C%20García%2C%20Nuevo%20León%2C%2066008" target="_blank" rel="noopener noreferrer">
+                    <span class="material-symbols-outlined mt-0.5 text-base text-blue-600" aria-hidden="true">location_on</span>
+                    <span>San Benito 212A, Santa Sofía,<br>Sector Élite, García, Nuevo León, C.P. 66008</span>
+                </a>
+                <a class="mt-3 flex items-center justify-center gap-2 font-semibold text-emerald-700 transition-colors hover:text-emerald-600 md:justify-start" href="https://wa.me/525655514362?text=Hola,%20me%20comunico%20desde%20cfdi.top%20y%20me%20gustaría%20recibir%20información." target="_blank" rel="noopener noreferrer">
+                    <span class="material-symbols-outlined text-base" aria-hidden="true">chat</span>
+                    <span>56 5551 4362 <span class="font-normal text-slate-500">(Solo WhatsApp)</span></span>
+                </a>
+            </address>
+
+            <nav class="flex content-start justify-center gap-x-8 gap-y-4 font-inter text-xs text-slate-500 flex-wrap md:flex-nowrap md:justify-end md:whitespace-nowrap" aria-label="Enlaces del pie de página">
+                <a class="text-slate-500 hover:text-blue-500 transition-all hover:underline" href="<?= url('aviso-de-privacidad') ?>">Aviso de Privacidad</a>
+                <a class="text-slate-500 hover:text-blue-500 transition-all hover:underline" href="<?= url('terminos-de-servicio') ?>">Términos de Servicio</a>
                 <a class="text-slate-500 hover:text-blue-500 transition-all hover:underline" href="<?= url('register') ?>">Documentación API</a>
-            </div>
+            </nav>
         </div>
     </footer>
 </body>
